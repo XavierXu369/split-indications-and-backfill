@@ -1,0 +1,4 @@
+interface:
+  display_name: "��Ӧ֢�����׸����"
+  short_description: "У�����롢��ֶ���Ӧ֢�����Թ�ʽ���������׸��ֶ�����"
+  default_prompt: "Use $split-indications-and-backfill to validate my Excel, show examples, and generate a split-and-backfill workbook."
