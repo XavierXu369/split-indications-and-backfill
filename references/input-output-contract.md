@@ -1,92 +1,141 @@
 # Input and output contract
 
-## Required source contract
+## 1. Required input
 
 Provide one Excel workbook and identify the complete source sheet.
 
-The source sheet must contain:
-
 | Role | Default field | Requirement |
 |---|---|---|
-| Stable key | `序号` | Nonblank and unique for every source record. |
+| Stable key | `序号` | Nonblank and unique; underlying Excel value type must be retained. |
 | Entity name | `药品` | Nonblank display field copied to every split row. |
-| Split field | `获批适应症` | Text to split by confirmed delimiters. |
-| Full source fields | All remaining columns | Required for the updated split base. |
+| Split field | `获批适应症` | Text split only by approved delimiters. |
+| Full source fields | All remaining columns | Required for the formula-backed updated base. |
 
-The user may provide another review sheet containing only the three key fields. Treat it as a cross-check only; do not use it as the formula source.
+A helper sheet containing only the three key fields may be used for review, but never as the formula source.
 
-## Validation response
+## 2. Staged execution
 
-Before samples, report:
+### Inspect
 
-- source-sheet name, source record count, and field count;
-- presence of the three required fields;
-- blank or duplicate key count;
+Run read-only and report:
+
+- workbook path, SHA-256, size, and last-write time;
+- source-sheet name and source signature;
+- UsedRange surface dimensions and effective nonblank dimensions;
+- source record and field counts;
+- workbook sheet list, extra sheets, hidden sheets, and defined-name count;
+- required-field presence;
+- blank and duplicate header counts;
+- blank and duplicate key counts;
 - blank entity-name count;
 - blank-indication count and entity list;
-- count of source records containing the confirmed delimiter;
-- whether a complete source pool is available.
+- records containing approved delimiters and records that actually create multiple rows;
+- consecutive/trailing delimiters or other empty segments;
+- repeated indication items within one source record;
+- delimiter-only records;
+- merged cells in the effective source range;
+- formulas in the source sheet that depend directly on another workbook sheet.
 
-Pass only when the key is unique and the full source pool exists.
+Inspection must not create a workbook. A run passes only when `CanProceed` is true.
 
-## Split rules
+### Preview
+
+Preview must reuse the same validation and requires explicit confirmation that the named source sheet is the complete pool. Return 1–2 representative examples, prioritizing a multi-item row and then a blank-indication row. Also return one exact XLOOKUP formula example. Do not create a workbook.
+
+### Generate
+
+Generate only after explicit approval and complete-source confirmation. Pass `ExpectedInputSha256` and `ExpectedSourceSignature` from the approved inspection/preview so a changed source cannot be used silently.
+
+## 3. Hard stops and warnings
+
+### Hard stops
+
+- input or source sheet unavailable;
+- incomplete source pool;
+- required field missing or duplicated;
+- blank or duplicate header;
+- blank or duplicate stable key;
+- blank entity name;
+- merged cells in the effective source range;
+- a nonblank indication contains only delimiters/whitespace;
+- delimiter is ambiguous or unapproved;
+- source formulas directly depend on a sheet that the standard three-sheet output would delete;
+- input/output extensions differ;
+- output would overwrite the input or an existing file;
+- approved file or source signature has changed;
+- formula calculation, formula coverage, source preservation, or reopened-workbook verification fails.
+
+### Warnings that do not change data automatically
+
+- blank indication: retain one blank split row;
+- consecutive or trailing delimiters: ignore blank segments but report the affected stable keys;
+- repeated indication items within one source record: retain every occurrence and report it;
+- hidden or extra sheets: report them before the standard output deletes non-source sheets;
+- workbook-defined names or formulas: report them for awareness.
+
+## 4. Split rules
 
 1. Default delimiter pattern: `[;；]`.
-2. Trim whitespace around each split item.
-3. Create one row for each nonblank split item, preserving the key and entity name.
-4. If the original split field is blank, create one row with a blank `适应症拆分结果`.
-5. Preserve original text in the source sheet and in the formula-backed original indication field.
-6. Do not infer a disease, remove a risk/end-point term, standardize wording, or perform mapping.
+2. Trim whitespace around each item.
+3. Create one row for every nonblank item, retaining original order.
+4. Do not deduplicate repeated items.
+5. If the original indication is blank, create one row with a blank `适应症拆分结果`.
+6. Preserve the full original indication in the source sheet and as a formula-backed field in `更新版拆分底稿`.
+7. Do not infer diseases, remove risk/end-point terms, standardize wording, or perform TA Mapping.
 
-## Three-sheet output
+## 5. Three-sheet output
 
 | Sheet | Required contents |
 |---|---|
-| Source | Original complete source sheet; unchanged. |
-| `拆分结果` | Key, entity name, `适应症拆分结果`. |
-| `更新版拆分底稿` | Key, entity name, `适应症拆分结果`, then all source fields except duplicated key and entity-name fields. |
+| Source | Original complete source sheet, unchanged in values, formulas, and number formats. |
+| `拆分结果` | Stable key, entity name, `适应症拆分结果`. |
+| `更新版拆分底稿` | Stable key, entity name, `适应症拆分结果`, then all source fields except duplicated key and entity-name fields. |
 
-In `更新版拆分底稿`, the original approved-indication column must be retained as a separate formula-backed field. The new split value appears only in column C.
+The output contains exactly these three sheets in this order. Output columns equal source columns plus one.
 
-## Formula contract
+## 6. Key and formula contract
 
-The output key is in column A. Each source field after column C receives an XLOOKUP formula pointing to the source key and the matching source return column. Example:
+- Read stable keys through Excel `Value2` and write the same underlying typed value; never use display `.Text` as the lookup key.
+- Preserve key number formats in both output sheets.
+- Distinguish text keys from numeric keys during uniqueness checks.
+- Use the output key in column A for every XLOOKUP.
+- Use absolute source ranges and quote/escape the source-sheet name.
+- Preserve true blanks rather than returning zero for blank source cells.
+- Fill formulas from row 2 through the final split row.
+- Preserve the matched source row's number format for every returned field.
+
+Example:
 
 ```excel
-=IFERROR(XLOOKUP($A2,'完整分子池'!$A$2:$A$75,'完整分子池'!$C$2:$C$75,""),"")
+=IFERROR(LET(_v,XLOOKUP($A2,'完整分子池'!$A$2:$A$75,'完整分子池'!$C$2:$C$75,""),IF(_v="","",_v)),"")
 ```
 
-- `$A2` locks the lookup column but lets the row change when filling downward.
-- Both source ranges use absolute references.
-- Fill all formulas from row 2 through the final split row.
-- Preserve source number formats for returned columns.
-- Keep the source and formula-backed sheets in the same workbook.
+## 7. Required verification
 
-## Quality checks
+After saving, close and reopen the output read-only. Verify:
 
-Before delivery, verify:
-
-- the source sheet is unchanged;
-- every nonblank semicolon item becomes one row;
-- blank indications remain one row;
+- exactly three required sheets and no others;
+- source signature unchanged;
+- split row count equals the precomputed expectation;
+- one output row for every nonblank item and every blank source indication;
 - output columns = source columns + 1;
-- formula count = output data rows × (source columns - 2);
-- formula range is fully populated;
-- one formula returns a value correctly and the original indication field remains available;
-- the output file does not overwrite the input or an existing delivery.
+- exact formula count = split data rows × (source columns - 2);
+- every cell in the formula region contains a formula;
+- no formula error cells;
+- at least one nonblank returned value equals its source value;
+- the original indication field remains present;
+- input remains untouched and output path is new.
 
-## Completion report template
+## 8. Completion report
 
-```text
-已完成：[文件名及路径]
+Report:
 
-- 原始记录数：X；原始字段数：Y
-- 拆分后记录数：Z；新增行数：Z - X
-- 含分隔符并拆分的原始记录数：A
-- 原始适应症为空但保留的记录数：B（列出实体标识）
-- 更新版拆分底稿：Z 行、Y + 1 列
-- 已填充回填公式：Z × (Y - 2) = N 个
-- 已核验：三 Sheet、公式覆盖、返回值、原始适应症保留
-
-异常/待确认事项：无；或列明实体标识与建议。
-```
+- source file SHA-256 and source signature;
+- source records/fields and split records/fields;
+- added rows;
+- records containing delimiters and records actually split;
+- blank indications retained;
+- empty-segment and repeated-item warnings;
+- exact formula count;
+- three-sheet, source-preservation, return-value, and formula-error status;
+- exceptions and output path.

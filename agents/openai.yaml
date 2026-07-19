@@ -1,4 +1,4 @@
 interface:
-  display_name: "��Ӧ֢�����׸����"
-  short_description: "У�����롢��ֶ���Ӧ֢�����Թ�ʽ���������׸��ֶ�����"
-  default_prompt: "Use $split-indications-and-backfill to validate my Excel, show examples, and generate a split-and-backfill workbook."
+  display_name: "适应症拆分与回填"
+  short_description: "校验完整分子池，拆分适应症并生成可追溯公式回填底稿"
+  default_prompt: "Use $split-indications-and-backfill to inspect my complete Excel pool, preview the indication split, and generate the verified formula-backfilled workbook after approval."

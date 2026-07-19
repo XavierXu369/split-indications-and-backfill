@@ -1,64 +1,74 @@
 ---
 name: split-indications-and-backfill
-description: Validate and process an Excel molecule, product, or asset pool when approved indications must be split from semicolon-separated text into one row per indication. Use when Codex must preserve a complete source sheet, show 1–2 examples for approval, and create a three-sheet workbook that formula-backfills all original fields by XLOOKUP.
+description: Inspect and process a complete Excel molecule, product, or asset pool when approved indications must be mechanically split into one row per nonblank item and every original field must be formula-backfilled. Use when Codex must preserve a complete source sheet, pause after validation and 1–2 previews, then create and verify a three-sheet XLOOKUP workbook without mapping, normalization, or medical interpretation.
 ---
 
 # Split Indications And Backfill
 
-Use this skill to create a traceable, row-level indication workbook without manually recreating the full source dataset.
+Create a traceable row-level indication workbook from a complete source pool.
 
-Before acting, read [references/input-output-contract.md](references/input-output-contract.md).
+Before acting, read [references/input-output-contract.md](references/input-output-contract.md). Use [scripts/create_split_workbook.ps1](scripts/create_split_workbook.ps1) for inspection, preview, generation, and verification.
 
-## Required interaction
+## Workflow
 
-Follow this sequence. Do not skip the confirmation gates.
+Keep the three stages separate. Do not generate the workbook during inspection or preview.
 
-1. **Request the input.** Ask the user for one Excel workbook, the full source-sheet name, and the output directory. The source sheet must contain a unique identifier, an entity-name field, an approved-indication field, and all fields that need to survive downstream.
-2. **Validate read-only.** Confirm the workbook and source sheet open; required fields exist; the identifier is nonblank and unique; entity names exist; count blank indications and rows containing the confirmed delimiter; and confirm that the source sheet is a complete pool rather than a three-column extract.
-3. **Report validation and pause.** State whether the input passes, list blank-indication entities, and say which source sheet will provide the formula backfill. If a blocking issue exists, stop and ask for a decision.
-4. **Show 1–2 samples.** Show representative split rows and one XLOOKUP example. Preserve all original wording; do not map, normalize, or medically interpret an indication at this stage.
-5. **Wait for explicit confirmation.** Only after the user approves the examples, generate the workbook.
-6. **Generate and verify.** Run [scripts/create_split_workbook.ps1](scripts/create_split_workbook.ps1). Reopen the output to check the three-sheet structure, row/column counts, formula coverage, one returned value, and blank-indication retention.
-7. **Report completion.** Give a clickable output path and the counts required by the reference contract.
+1. Obtain the input workbook, complete source-sheet name, output directory, stable key field, entity-name field, indication field, and approved delimiters.
+2. Run the script with `-Mode Inspect`. Report the source fingerprint, effective dimensions, required-field checks, key checks, blank indications, delimiter anomalies, duplicate items, extra/hidden sheets, merged cells, and source-sheet dependencies.
+3. Stop on any blocker. Do not invent a key, delimiter, or source field.
+4. Run `-Mode Preview -PreviewCount 2`. Show 1–2 representative split examples and the formula example. Preserve source wording; do not map, normalize, deduplicate, or medically interpret indications.
+5. Wait for explicit user approval.
+6. Run `-Mode Generate` with the approved output path plus the input SHA-256 and source signature returned by inspection. Never overwrite an existing file.
+7. Use the script's reopened-workbook verification result. Report counts, warnings, formula coverage, source preservation, and the output path.
 
-## Input rules
+## Core rules
 
-- Default field names are `序号`, `药品`, and `获批适应症`; accept alternative names only when the user explicitly specifies them.
-- Split only confirmed delimiters. The script defaults to English and full-width semicolons (`;` and `；`). Do not treat commas, slashes, parentheses, or line breaks as split delimiters unless the user authorizes this.
-- A three-column helper sheet may be used for review, but it is not sufficient for formula backfill. Require a complete source sheet.
-- If the identifier is duplicated, do not run XLOOKUP. Ask the user to provide a stable composite or technical key first.
-- If an indication is blank, retain one row with a blank split-result cell. Do not delete or infer content.
+- Require a complete source sheet. A three-column helper sheet is review-only and cannot supply all backfilled fields.
+- Default fields are `序号`, `药品`, and `获批适应症`. Accept alternatives only when explicitly supplied or unambiguously confirmed.
+- Default delimiters are English and full-width semicolons (`;` and `；`). Split nothing else without approval.
+- Retain one blank split row when the original indication is blank.
+- Preserve duplicate indication items as separate rows and flag them; do not silently deduplicate.
+- Preserve the stable key's underlying Excel value type and number format. Do not convert numeric keys to display text.
+- Treat duplicate or blank keys, blank/duplicate headers, merged source cells, delimiter-only content, ambiguous delimiters, source dependencies on sheets that would be deleted, fingerprint drift, existing output, or verification failure as hard stops.
+- Never modify the input workbook.
 
-## Output contract
+## Output
 
-The generated workbook contains exactly three sheets:
+Generate exactly three sheets:
 
-1. The complete source sheet, unchanged and used as the formula source.
-2. `拆分结果`: identifier, entity name, and `适应症拆分结果` only.
-3. `更新版拆分底稿`: identifier, entity name, `适应症拆分结果`, then every other source field in source order. The original full indication field remains in this sheet.
+1. The complete source sheet, unchanged.
+2. `拆分结果`: stable key, entity name, and `适应症拆分结果`.
+3. `更新版拆分底稿`: the same first three fields, followed by every remaining source field in source order. Retain the original full indication field.
 
-All fields after the first three columns are XLOOKUP formulas filled through every generated row. The source workbook is never modified.
+Backfill every field after column C with XLOOKUP formulas. Preserve blanks and number formats. Do not replace formulas with static values.
 
-## Run the script
-
-On Windows with desktop Excel installed, run the script after confirmation. Use explicit paths and avoid overwriting files.
+## Commands
 
 ```powershell
-& .\scripts\create_split_workbook.ps1 `
+$script = ".\scripts\create_split_workbook.ps1"
+
+& $script -Mode Inspect `
+  -InputPath "C:\path\input.xlsx" `
+  -SourceSheet "完整分子池" `
+  -IdColumn "序号" -NameColumn "药品" -IndicationColumn "获批适应症" |
+  Format-List *
+
+& $script -Mode Preview `
+  -InputPath "C:\path\input.xlsx" `
+  -SourceSheet "完整分子池" `
+  -IdColumn "序号" -NameColumn "药品" -IndicationColumn "获批适应症" `
+  -PreviewCount 2 -CompleteSourceConfirmed |
+  Format-List *
+
+& $script -Mode Generate `
   -InputPath "C:\path\input.xlsx" `
   -OutputPath "C:\path\output.xlsx" `
   -SourceSheet "完整分子池" `
-  -IdColumn "序号" `
-  -NameColumn "药品" `
-  -IndicationColumn "获批适应症"
+  -IdColumn "序号" -NameColumn "药品" -IndicationColumn "获批适应症" `
+  -CompleteSourceConfirmed `
+  -ExpectedInputSha256 "<inspect result>" `
+  -ExpectedSourceSignature "<inspect result>" |
+  Format-List *
 ```
 
-If Excel COM automation is unavailable, report that the deterministic formula-backfill step is blocked; do not silently substitute a different output design.
-
-## Hard stops
-
-Stop and ask for human direction when the key is missing or duplicated, the full source sheet is unavailable, delimiters are ambiguous, the requested output would overwrite an existing file, source fields conflict, or formula calculation/verification fails.
-
-## Completion report
-
-Report: source record and field counts; output row and column counts; number of records split; blank-indication entities retained; number of formulas filled; verification status; any exception; and the output path.
+If desktop Excel COM automation is unavailable, report that the deterministic formula-backfill workflow is blocked. Do not silently substitute another output design.
